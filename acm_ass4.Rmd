@@ -1,0 +1,191 @@
+---
+title: "acm_ass4"
+author: "Sofie Ditmer"
+date: '2022-04-22'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Packages
+```{r}
+library(pacman)
+p_load(tibble)
+```
+
+*STUDY DESIGN*
+"Iowa Gambling Task" with two sets of card decks. One is the winning deck and the other is the losing deck:
+
+Deck 1 (winning): 1 60%, -1 40% | average +0.2
+Deck 2 (losing): 1 40%, -1 60% | average -0.2
+
+Simulate data
+```{r}
+deck1 <- sample((c(rep(1, 600), rep(-1, 400)))) # winning on the long run
+deck2 <- sample((c(rep(1, 400), rep(-1, 600)))) # losing on the long run
+```
+
+Reinforcement Learning Model
+```{r}
+valueUpdate <- function(value, alpha, choice, feedback) {
+  
+  # prediction error
+  PE <- feedback - value
+  
+  # value 1
+  v1 <- value[1] + alpha * (1 - choice) * (feedback - value[1])
+  
+  # value 2
+  v2 <- value[2] + alpha * (choice) * (feedback - value[2])
+  
+  # update both values
+  updatedValue <- c(v1, v2)
+  
+  return(updatedValue)
+}
+
+# Set some initial values
+value <- c(0, 0) # initial values for the two decks
+
+alpha <- c(0.6, 0.8) # learning rates (with a difference of 0.2)
+
+temp <- 0.5 # tau (how much we explore/exploit)
+
+trials <- 1000 # number of trials
+
+# define softmax function (which is used to choose the highest reward - NB! depending on tau, i.e. how much the subject explores/exploits)
+softmax <- function(x, tau) {
+  outcome = 1 / (1 + exp(-tau * x))
+  return(outcome)
+}
+
+# creating empty tibbles to be updated
+tibble_condition1 <- tibble(choice = rep(NA, trials),
+                       value1 = rep(NA, trials),
+                       value2 = rep(NA, trials),
+                       feedback = rep(NA, trials))
+
+tibble_condition2 <- tibble(choice = rep(NA, trials),
+                       value1 = rep(NA, trials),
+                       value2 = rep(NA, trials),
+                       feedback = rep(NA, trials))
+```
+
+Updating tibbles according to reinforcement learning model
+```{r}
+# looping over all trials for condition 1
+for (i in 1:trials) {
+  
+  # define choice (the one with the highest reward conditioned on temp, i.e. the balance between exploitation/exploration)
+  choice <- rbinom(1, 1, softmax(value[2] - value[1], temp))
+  
+  # define feedback which is dependent on the choice the subject makes
+  feedback <- ifelse(choice==0, deck1[i], deck2[i])
+  
+  # value updating according to valueUpdating function
+  value <- valueUpdate(value, alpha[1], choice, feedback)
+  
+  # update tibble
+  tibble_condition1$choice[i] <- choice
+  tibble_condition1$value1[i] <- value[1]
+  tibble_condition1$value2[i] <- value[2]
+  tibble_condition1$feedback[i] <- feedback
+  
+}
+
+# looping over all trials for condition 2
+for (i in 1:trials) {
+  
+  # define choice (the one with the highest reward conditioned on temp, i.e. the balance between exploitation/exploration)
+  choice <- rbinom(1, 1, softmax(value[2] - value[1], temp))
+  
+  # define feedback which is dependent on the choice the subject makes
+  feedback <- ifelse(choice==0, deck1[i], deck2[i])
+  
+  # value updating according to valueUpdating function
+  value <- valueUpdate(value, alpha[2], choice, feedback)
+  
+  # update tibble
+  tibble_condition2$choice[i] <- choice
+  tibble_condition2$value1[i] <- value[1]
+  tibble_condition2$value2[i] <- value[2]
+  tibble_condition2$feedback[i] <- feedback
+  
+}
+  
+```
+
+Parse the model file to stan
+```{r}
+file = file.path("./stan_model.stan")
+mod = cmdstan_model(file, cpp_options = list(stan_threads = TRUE))
+```
+
+Parameter recovery
+```{r}
+# n_trial_list = c(200, 300, 500, 1000)
+# params_df <- NULL
+# for(n_trial in n_trial_list){
+#   
+#   # get trial n 
+#   trials = n_trial
+#   
+#   # generate data set   
+#   data = run_trial(0.8, 0.8, trials,"WSLSAgent","Random")
+#   
+#   # feed data to stan
+#   stan_data <- list(
+#   n = trials,
+#   h = data$Self, 
+#   s = data$staybias, 
+#   l = data$leavebias,
+#   prior_mean = 0,
+#   prior_sd = 1
+# )
+#   samples = mod$sample(
+#   data = stan_data, 
+#   seed = 123, 
+#   chains = 2, 
+#   parallel_chains = 2, 
+#   threads_per_chain = 2, 
+#   iter_warmup = 2000, 
+#   iter_sampling = 2000, 
+#   refresh = 2000, 
+#   max_treedepth = 20, 
+#   adapt_delta = 0.99,
+# )
+#   
+#   draws_df <- as_draws_df(samples$draws())
+#   temp <- tibble(alpha_posterior = draws_df$alpha_posterior,
+#                  b1_posterior = draws_df$b1_posterior,
+#                  b2_posterior = draws_df$b2_posterior,
+#                  #prior_preds = draws_df$prior_preds,
+#                  #posterior_preds = draws_df$posterior_preds,
+#                  win_prob = draws_df$win_prob,
+#                  lose_prob = draws_df$lose_prob,
+#                  n_trials = n_trial
+#                )
+#   
+#   if(exists("params_df")){
+#     params_df <- rbind(params_df, temp)}
+#   else{
+#     params_df <- temp
+#   }
+# }
+# params_df
+```
+
+
+Plot parameter recovery results
+```{r}
+# ggplot(params_df, aes(x=n_trials, y=b2_posterior)) + 
+#   geom_point() + geom_hline(yintercept=0.8, linetype="dashed", color = "red")
+# ggplot(params_df, aes(x=n_trials, y=b1_posterior)) + 
+#   geom_point() + geom_hline(yintercept=0.8, linetype="dashed", color = "red")
+# ggplot(params_df, aes(x=n_trials, y=win_prob)) + 
+#   geom_point()
+```
+
+
