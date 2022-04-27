@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 Packages
 ```{r}
 library(pacman)
-p_load(tibble)
+p_load(tibble, cmdstanr)
 ```
 
 *STUDY DESIGN*
@@ -51,7 +51,7 @@ value <- c(0, 0) # initial values for the two decks
 
 alpha <- c(0.6, 0.8) # learning rates (with a difference of 0.2)
 
-temp <- 0.5 # tau (how much we explore/exploit)
+temp <- 0.5 # tau (how much the agent explores/exploits)
 
 trials <- 1000 # number of trials
 
@@ -117,11 +117,40 @@ for (i in 1:trials) {
   
 ```
 
+Prepare data for stan format
+```{r}
+data <- list(
+  n_trials = trials,
+  n_conditions = 2,
+  choice = matrix(c(tibble_condition1$choice, tibble_condition2$choice), nrow = nrow(tibble_condition1), ncol = 2),
+  feedback = matrix(c(tibble_condition1$feedback, tibble_condition2$feedback), nrow = nrow(tibble_condition1), ncol = 2),
+  temp = temp
+)
+```
+
 Parse the model file to stan
 ```{r}
 file = file.path("./stan_model.stan")
 mod = cmdstan_model(file, cpp_options = list(stan_threads = TRUE))
 ```
+
+Draw samples from stan model
+```{r}
+samples <- mod$sample(
+  data = data,
+  seed = 123,
+  chains = 1,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 2000,
+  iter_sampling = 2000,
+  refresh = 1000,
+  max_treedepth = 20,
+  adapt_delta = 0.99
+)
+```
+
+
 
 Parameter recovery
 ```{r}
